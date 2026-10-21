@@ -1,0 +1,17 @@
+{
+    "name": "plancraft-ai",
+    "version": "1.0.0",
+    "description": "GenAI-Powered Planning Assistant for Weddings, Birthdays, and Community Events",
+    "main": "app.js",
+    "scripts": {
+        "test": "node tests/planner.test.js"
+    },
+    "keywords": [
+        "genai",
+        "event-planner",
+        "gemini",
+        "accessibility"
+    ],
+    "author": "",
+    "license": "MIT"
+}
