@@ -1,11 +1,16 @@
 /**
  * @file app.js
- * PlanCraft AI — Complete, Accessible, and Fully Rendered Event Engine
+ * PlanCraft AI — Modular, High-Efficiency & Accessible Event Engine
+ * @version 2.0.0
  */
 
 'use strict';
 
-// --- Safe HTML Sanitizer (Prevents XSS) ---
+/**
+ * Escapes unsafe characters to neutralize XSS injection.
+ * @param {string} str 
+ * @returns {string} Sanitized string
+ */
 function escapeHTML(str) {
     if (typeof str !== 'string') return '';
     return str.replace(/[&<>"']/g, (m) => ({
@@ -17,11 +22,26 @@ function escapeHTML(str) {
     })[m]);
 }
 
-// --- Event Presets ---
-const eventData = {
+/**
+ * Debounce utility to prevent unthrottled DOM re-renders.
+ * @param {Function} fn 
+ * @param {number} delay 
+ * @returns {Function}
+ */
+function debounce(fn, delay = 250) {
+    let timer;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
+// Preset Library
+const eventPresets = {
     wedding: {
         title: "Maya & Alex's Bohemian Wedding",
         type: "wedding",
+        vibe: "Bohemian Chic",
         guestCount: 150,
         budget: 25000,
         budgetItems: [
@@ -57,6 +77,7 @@ const eventData = {
     birthday: {
         title: "Liam's Retro 80s Synthwave 30th Birthday",
         type: "birthday",
+        vibe: "Neon Synthwave",
         guestCount: 60,
         budget: 4500,
         budgetItems: [
@@ -88,6 +109,7 @@ const eventData = {
     community: {
         title: "Oakridge Harvest Charity Gala & Block Fair",
         type: "community",
+        vibe: "Rustic Community Harvest",
         guestCount: 400,
         budget: 15000,
         budgetItems: [
@@ -118,14 +140,21 @@ const eventData = {
     }
 };
 
-// Current active state (auto-restored from LocalStorage if available)
-let state = JSON.parse(localStorage.getItem('plancraft_state') || 'null') || eventData.wedding;
+// Cached DOM element dictionary for maximum query efficiency
+const DOM = {};
+
+// Active state
+let state = JSON.parse(localStorage.getItem('plancraft_state') || 'null') || eventPresets.wedding;
 
 function saveState() {
-    localStorage.setItem('plancraft_state', JSON.stringify(state));
+    try {
+        localStorage.setItem('plancraft_state', JSON.stringify(state));
+    } catch (err) {
+        console.error("Storage error:", err);
+    }
 }
 
-// --- Tab Switching ---
+// Tab Switching
 function switchTab(tabId) {
     ['ideas', 'budget', 'timeline', 'vendors'].forEach(id => {
         const section = document.getElementById(`content-${id}`);
@@ -144,28 +173,26 @@ function switchTab(tabId) {
     if (window.lucide) window.lucide.createIcons();
 }
 
-// --- Render 1: Budget Stats and Table ---
+// Budget Module
 function renderBudget() {
     const committed = state.budgetItems.reduce((acc, i) => acc + (Number(i.actual) || 0), 0);
     const remaining = state.budget - committed;
 
-    const elAllocated = document.getElementById('lblAllocated');
-    const elCommitted = document.getElementById('lblCommitted');
-    const elRemaining = document.getElementById('lblRemaining');
-
-    if (elAllocated) elAllocated.textContent = `$${state.budget.toLocaleString()}`;
-    if (elCommitted) elCommitted.textContent = `$${committed.toLocaleString()}`;
-    if (elRemaining) {
-        elRemaining.textContent = `$${remaining.toLocaleString()}`;
-        elRemaining.className = remaining < 0 ? 'text-2xl font-bold text-red-600 mt-1' : 'text-2xl font-bold text-emerald-600 mt-1';
+    if (DOM.lblAllocated) DOM.lblAllocated.textContent = `$${state.budget.toLocaleString()}`;
+    if (DOM.lblCommitted) DOM.lblCommitted.textContent = `$${committed.toLocaleString()}`;
+    if (DOM.lblRemaining) {
+        DOM.lblRemaining.textContent = `$${remaining.toLocaleString()}`;
+        DOM.lblRemaining.className = remaining < 0 ? 'text-2xl font-bold text-red-600 mt-1' : 'text-2xl font-bold text-emerald-600 mt-1';
     }
 
-    const container = document.getElementById('budgetTableContainer');
-    if (!container) return;
+    if (!DOM.budgetTableContainer) return;
 
     let html = `
     <div class="flex items-center justify-between mb-3">
-      <h3 class="text-sm font-bold text-slate-800">Budget Breakdown by Category</h3>
+      <div>
+        <h3 class="text-sm font-bold text-slate-800">Budget Breakdown by Category</h3>
+        <span class="text-[11px] text-slate-500">${committed > state.budget ? '⚠️ Warning: Over target budget' : '✓ Spending within allocated limit'}</span>
+      </div>
       <button onclick="addBudgetItem()" class="px-3 py-1 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-semibold focus:ring-2 focus:ring-fuchsia-500">
         + Add Expense
       </button>
@@ -205,14 +232,14 @@ function renderBudget() {
     });
 
     html += `</tbody></table></div>`;
-    container.innerHTML = html;
+    DOM.budgetTableContainer.innerHTML = html;
 }
 
 function addBudgetItem() {
-    const category = prompt("Enter expense category name (e.g., Lighting, Invitations, Favors):");
+    const category = prompt("Category name (e.g. Venue, Decor, Music, Transportation):");
     if (!category) return;
-    const estimated = Number(prompt("Estimated Cost ($):") || "0");
-    const actual = Number(prompt("Actual Cost ($):") || "0");
+    const estimated = Math.max(0, Number(prompt("Estimated budget ($):") || "0"));
+    const actual = Math.max(0, Number(prompt("Actual cost ($):") || "0"));
     state.budgetItems.push({ category, estimated, actual, status: "Planned" });
     renderBudget();
     saveState();
@@ -224,19 +251,25 @@ function deleteBudgetItem(idx) {
     saveState();
 }
 
-// --- Render 2: Timelines & Milestones ---
+// Timeline Module
 function renderTimeline() {
-    // Milestones
-    const milestoneContainer = document.getElementById('milestoneItems');
-    if (milestoneContainer) {
+    if (DOM.milestoneItems) {
+        const completed = state.milestones.filter(m => m.done).length;
+        const pct = state.milestones.length ? Math.round((completed / state.milestones.length) * 100) : 0;
+
         let html = `
-      <div class="flex justify-end mb-2">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-slate-600">Completion: ${pct}% (${completed}/${state.milestones.length})</span>
         <button onclick="addMilestone()" class="text-xs font-semibold text-fuchsia-600 hover:underline">+ Add Milestone</button>
       </div>
+      <div class="w-full bg-slate-100 rounded-full h-1.5 mb-3">
+        <div class="bg-fuchsia-600 h-1.5 rounded-full" style="width: ${pct}%"></div>
+      </div>
     `;
+
         state.milestones.forEach((m, idx) => {
             html += `
-        <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100">
+        <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100 mb-2">
           <label class="flex items-center gap-3 cursor-pointer">
             <input type="checkbox" ${m.done ? 'checked' : ''} onchange="toggleMilestone(${idx})" class="w-4 h-4 rounded text-fuchsia-600 focus:ring-fuchsia-500" />
             <div>
@@ -248,12 +281,10 @@ function renderTimeline() {
         </div>
       `;
         });
-        milestoneContainer.innerHTML = html;
+        DOM.milestoneItems.innerHTML = html;
     }
 
-    // Schedule
-    const scheduleContainer = document.getElementById('scheduleItems');
-    if (scheduleContainer) {
+    if (DOM.scheduleItems) {
         let html = `
       <div class="flex justify-end mb-2">
         <button onclick="addSchedule()" class="text-xs font-semibold text-fuchsia-600 hover:underline">+ Add Time Slot</button>
@@ -261,7 +292,7 @@ function renderTimeline() {
     `;
         state.schedule.forEach((s, idx) => {
             html += `
-        <div class="flex items-start justify-between p-2 rounded-lg hover:bg-slate-50">
+        <div class="flex items-start justify-between p-2 rounded-lg hover:bg-slate-50 mb-1">
           <div>
             <div class="flex items-center gap-2">
               <span class="text-xs font-bold text-fuchsia-700">${escapeHTML(s.time)}</span>
@@ -273,7 +304,7 @@ function renderTimeline() {
         </div>
       `;
         });
-        scheduleContainer.innerHTML = html;
+        DOM.scheduleItems.innerHTML = html;
     }
 }
 
@@ -284,9 +315,9 @@ function toggleMilestone(idx) {
 }
 
 function addMilestone() {
-    const task = prompt("Enter milestone task (e.g., Confirm floral delivery):");
+    const task = prompt("Milestone task description:");
     if (!task) return;
-    const time = prompt("Target timeframe (e.g., 2 Weeks Out):") || "Upcoming";
+    const time = prompt("Target timeframe (e.g. 1 Month Out):") || "Upcoming";
     state.milestones.push({ time, task, done: false });
     renderTimeline();
     saveState();
@@ -299,10 +330,10 @@ function deleteMilestone(idx) {
 }
 
 function addSchedule() {
-    const time = prompt("Enter time (e.g., 03:00 PM):");
+    const time = prompt("Time slot (e.g. 05:30 PM):");
     if (!time) return;
-    const event = prompt("Enter event name (e.g., Cake Cutting):");
-    const person = prompt("Lead person responsible:") || "Host";
+    const event = prompt("Run of show event name:");
+    const person = prompt("Person / Vendor responsible:") || "Host";
     state.schedule.push({ time, event, person });
     renderTimeline();
     saveState();
@@ -314,14 +345,13 @@ function deleteSchedule(idx) {
     saveState();
 }
 
-// --- Render 3: Vendor Checklist ---
+// Vendor Module
 function renderVendors() {
-    const container = document.getElementById('vendorList');
-    if (!container) return;
+    if (!DOM.vendorList) return;
 
     let html = `
     <div class="flex items-center justify-between mb-3">
-      <span class="text-xs text-slate-500">Track contracts, quotations, and booking status:</span>
+      <span class="text-xs text-slate-500">Pipeline progression: Shortlisted ➔ Contacted ➔ Booked ➔ Paid</span>
       <button onclick="addVendor()" class="px-3 py-1 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-semibold focus:ring-2 focus:ring-fuchsia-500">
         + Add Vendor
       </button>
@@ -363,7 +393,7 @@ function renderVendors() {
     });
 
     html += `</tbody></table></div>`;
-    container.innerHTML = html;
+    DOM.vendorList.innerHTML = html;
 }
 
 function cycleVendorStatus(idx) {
@@ -375,11 +405,11 @@ function cycleVendorStatus(idx) {
 }
 
 function addVendor() {
-    const role = prompt("Service role (e.g., DJ, Florals, Catering):");
+    const role = prompt("Service role (e.g. Photography, Catering, Florals):");
     if (!role) return;
     const name = prompt("Business name:");
-    const fee = Number(prompt("Fee quote ($):") || "0");
-    const contact = prompt("Phone or email contact:") || "";
+    const fee = Math.max(0, Number(prompt("Quoted fee ($):") || "0"));
+    const contact = prompt("Contact email or phone:") || "";
     state.vendors.push({ role, name, fee, status: "Shortlisted", contact });
     renderVendors();
     saveState();
@@ -391,57 +421,77 @@ function deleteVendor(idx) {
     saveState();
 }
 
-// --- GenAI Creative Hub ---
+// GenAI Ideas Module (Personalized by Event Context)
 function requestAi(category) {
     const header = document.getElementById('aiHeader');
     const body = document.getElementById('aiBody');
     if (!header || !body) return;
 
-    header.textContent = `Generated ${category.toUpperCase()} Ideas`;
-    body.textContent = "Analyzing event context and generating recommendations...";
+    const title = state.title || 'Event';
+    const type = state.type || 'Celebration';
+    const guests = state.guestCount || 100;
+    const budget = state.budget || 10000;
+
+    header.textContent = `Personalized GenAI ${category.toUpperCase()} Ideas`;
+    body.textContent = `Analyzing parameters for ${title} (${guests} guests, $${budget.toLocaleString()} budget)...`;
 
     setTimeout(() => {
         if (category === 'theme') {
-            body.textContent = `🎨 Color Palette:
-- Terracotta Rust (#C86446)
-- Sage Eucalyptus (#8A9A86)
-- Champagne Gold (#D7C49E)
-- Crisp Ivory (#FAF7F2)
+            body.textContent = `🎨 Tailored Aesthetic for ${title}:
+• Color Palette:
+  - Primary: Warm Ochre (#C86446)
+  - Secondary: Eucalyptus Green (#8A9A86)
+  - Accent: Champagne Shimmer (#D7C49E)
+  - Base: Natural Linen (#FAF7F2)
 
 ✨ Decor Vision:
-Layer natural raw linen runners with dried pampas grass and soft garden roses. Use ribbed amber votives and 2200K warm festoon bulbs for an intimate evening glow.`;
+Designed for ${guests} guests within a $${budget.toLocaleString()} budget. Layer natural fiber table runners with clustered dried florals, brass accents, and low 2200K amber festoon lighting to create an intimate atmosphere.`;
         } else if (category === 'menu') {
-            body.textContent = `🍸 Signature Cocktails:
-1. "The Rosemary Dusk": Smoked bourbon, blackberry reduction, charred rosemary.
-2. "Elderflower Spritz" (Mocktail): Sparkling botanical tonic, blood orange slice, mint.
+            body.textContent = `🍽️ Custom Catering & Beverage Concept for ${guests} Attendees:
+🍸 Signature Cocktails:
+1. "The Harvest Dusk" (Bourbon, smoked blackberry reduction, charred rosemary)
+2. "Botanical Meadow Tonic" (Elderflower spritz, blood orange wheel, fresh mint)
 
-🍽️ Dinner Progression:
-- Appetizer: Wild mushroom & caramelized onion tartlet with goat cheese crumble.
-- Main: Herb-crusted salmon with saffron risotto OR Charred cauliflower steak with chimichurri.
-- Dessert: Mini olive-oil lemon cake with lavender glaze.`;
+🍴 Multi-Course Progression:
+- Hors d'oeuvres: Wild forest mushroom tartlet with herb chevre.
+- Main Entrée: Pan-seared wild salmon over saffron risotto OR Fire-roasted spiced cauliflower steak.
+- Dessert: Olive-oil lemon cake with lavender honey glaze.`;
         } else if (category === 'activities') {
-            body.textContent = `🎲 Guest Engagement Concepts:
-1. Audio Guestbook: A vintage rotary telephone where guests record voicemail wishes.
-2. Table Icebreaker Cards: Custom prompts like "Share your most hilarious story with the hosts".
-3. Polaroid Memory Board: Instant photo station with metallic gel pens.`;
+            body.textContent = `🎲 Interactive Guest Experiences for ${guests} Guests:
+1. "The Audio Telephone Guestbook": Vintage rotary telephone where attendees pick up the receiver to record unfiltered, voicemail-style memories and heartfelt wishes.
+2. "Custom Table Icebreaker Prompt Cards": Tailored conversation starters reflecting the hosts' journey.
+3. "Polaroid Keepsake Wall": Guests snap instant photos, sign them with metallic pens, and pin them onto a custom board.`;
         } else {
-            body.textContent = `🎙️ Personalized Toast Draft:
+            body.textContent = `✍️ Tailored Welcome Address & Toast Outline:
 
-"Good evening everyone. Looking out across this room tonight, surrounded by the people who have shaped our lives, words hardly do justice to how grateful we feel. 
+"Good evening everyone. Looking out across this room tonight, surrounded by all ${guests} of you who have shaped our lives, words hardly do justice to how grateful we feel. 
 
-Every single person here holds a chapter in our journey. Whether you traveled across oceans or just down the street, thank you for your warmth and energy. 
-
-Tonight is about celebrating connection, sharing good food, and making memories that will outlast the evening. Let us raise our glasses—cheers!"`;
+Every single person here holds a meaningful chapter in this journey. Tonight is about celebrating connection, sharing exceptional food, and creating memories that will outlast the evening. Let's raise our glasses—cheers!"`;
         }
-    }, 400);
+    }, 350);
 }
 
-// --- Event Listeners & Master Render ---
+// Master Render & Event Bindings
+function cacheDomElements() {
+    DOM.lblAllocated = document.getElementById('lblAllocated');
+    DOM.lblCommitted = document.getElementById('lblCommitted');
+    DOM.lblRemaining = document.getElementById('lblRemaining');
+    DOM.budgetTableContainer = document.getElementById('budgetTableContainer');
+    DOM.milestoneItems = document.getElementById('milestoneItems');
+    DOM.scheduleItems = document.getElementById('scheduleItems');
+    DOM.vendorList = document.getElementById('vendorList');
+    DOM.eventTitle = document.getElementById('eventTitle');
+    DOM.eventType = document.getElementById('eventType');
+    DOM.guestCount = document.getElementById('guestCount');
+    DOM.totalBudget = document.getElementById('totalBudget');
+    DOM.exportBtn = document.getElementById('exportBtn');
+}
+
 function renderAll() {
-    document.getElementById('eventTitle').value = state.title;
-    document.getElementById('eventType').value = state.type;
-    document.getElementById('guestCount').value = state.guestCount;
-    document.getElementById('totalBudget').value = state.budget;
+    if (DOM.eventTitle) DOM.eventTitle.value = state.title;
+    if (DOM.eventType) DOM.eventType.value = state.type;
+    if (DOM.guestCount) DOM.guestCount.value = state.guestCount;
+    if (DOM.totalBudget) DOM.totalBudget.value = state.budget;
 
     renderBudget();
     renderTimeline();
@@ -449,46 +499,45 @@ function renderAll() {
     if (window.lucide) window.lucide.createIcons();
 }
 
-// Switch Event Preset
-document.getElementById('eventType')?.addEventListener('change', (e) => {
-    const chosenType = e.target.value;
-    if (eventData[chosenType]) {
-        state = JSON.parse(JSON.stringify(eventData[chosenType]));
+function bindEvents() {
+    DOM.eventType?.addEventListener('change', (e) => {
+        const chosen = e.target.value;
+        if (eventPresets[chosen]) {
+            state = JSON.parse(JSON.stringify(eventPresets[chosen]));
+            saveState();
+            renderAll();
+        }
+    });
+
+    // Debounced input listeners to prevent unneeded re-renders
+    DOM.totalBudget?.addEventListener('input', debounce((e) => {
+        state.budget = Math.max(0, Number(e.target.value) || 0);
+        renderBudget();
         saveState();
-        renderAll();
-    }
-});
+    }, 200));
 
-// Update budget directly
-document.getElementById('totalBudget')?.addEventListener('input', (e) => {
-    state.budget = Number(e.target.value) || 0;
-    renderBudget();
-    saveState();
-});
+    DOM.guestCount?.addEventListener('input', debounce((e) => {
+        state.guestCount = Math.max(1, Number(e.target.value) || 1);
+        saveState();
+    }, 200));
 
-// Update guest count directly
-document.getElementById('guestCount')?.addEventListener('input', (e) => {
-    state.guestCount = Number(e.target.value) || 0;
-    saveState();
-});
+    DOM.eventTitle?.addEventListener('input', debounce((e) => {
+        state.title = e.target.value.trim();
+        saveState();
+    }, 200));
 
-// Update title directly
-document.getElementById('eventTitle')?.addEventListener('input', (e) => {
-    state.title = e.target.value;
-    saveState();
-});
+    DOM.exportBtn?.addEventListener('click', () => {
+        const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(state.title || 'event').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_plan.json`;
+        a.click();
+    });
+}
 
-// Export JSON
-document.getElementById('exportBtn')?.addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${state.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_plan.json`;
-    a.click();
-});
-
-// Initialize on DOM load
 window.addEventListener('DOMContentLoaded', () => {
+    cacheDomElements();
+    bindEvents();
     renderAll();
 });
